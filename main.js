@@ -8,7 +8,11 @@ CSSChecker = function(options){
         pages: options.pages,
         _browser: null,
         _rules: [],
-        _usedRules: []
+        _usedRules: [],
+        _counter: {
+            'css': 0,
+            'parsed': 0
+        }
     };
 
     this.init();
@@ -26,13 +30,13 @@ CSSChecker.prototype._initBrowser = function(){
 
 CSSChecker.prototype._visitPage = function(page){
 
-    var fetchedCSS = 0,
-        cssFiles = null,
+    var cssFiles = null,
         self = this;
 
     this.options._browser.visit(this.options.host, function(e, browser, status){
 
         cssFiles = browser.document.styleSheets;
+        self.options._counter.css = self.options._counter.css + browser.document.styleSheets.length 
 
         if(!cssFiles){
             return
@@ -40,17 +44,30 @@ CSSChecker.prototype._visitPage = function(page){
 
         for(var i=0,l=cssFiles.length;i<l;i++){
             var _href = cssFiles[i].href.match(/$http/) ? cssFiles[i].href : self.options.host+"/"+cssFiles[i].href
-            console.log("check "+_href);
-            self._fetchFile(_href, function(b){
-                console.log("done...")
-            })
+            if(_href == self.options.host+"/"){
+                console.log("checking inline stylesheets...");
+                self._collectRules(cssFiles[i].cssText);
+            } else {
+                console.log("checking "+_href);
+                self._fetchFile(_href, function(body){
+                    self._collectRules(body)
+                })
+            }
         }
 
     });
 }
 
-CSSChecker.prototype.collectStylesheets = function(){
+CSSChecker.prototype._collectRules = function(css){
+    // Populatin rules array...
+    this.options._rules = this.options._rules.concat(this._parseCSSRules(css));
 
+    // Counting css...
+    this.options._counter.parsed = this.options._counter.parsed+1;
+
+    if(this.options._counter.parsed == this.options._counter.css){
+        console.log('finito');
+    }
 }
 
 CSSChecker.prototype._parseCSSRules = function(css){
