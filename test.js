@@ -1,9 +1,9 @@
 var CC = require('./main');
 
 var u = new CC({
-    host: 'i.smashup.it',
+    host: 'www.juglugano.ch',
     pages: [
-        "/",
-        "/pippo.html"
-    ]
+        "/"
+    ],
+    engine: 'tobi'
 });
