@@ -25,7 +25,7 @@ CSSChecker.prototype.init = function(){
     this._initBrowser();
     
     for(var i=0,l=this.options.pages.length;i<l;i++){
-        this._visitPage(this.options.pages[i]);
+        this._visitPage(this.options.pages[i], this._getStylesheets);
     }
 }
 
@@ -40,7 +40,7 @@ CSSChecker.prototype._initBrowser = function(){
     }
 }
 
-CSSChecker.prototype._visitPage = function(page){
+CSSChecker.prototype._visitPage = function(page, callback){
 
     var cssFiles = null,
         self = this;
@@ -48,18 +48,36 @@ CSSChecker.prototype._visitPage = function(page){
     if(this.options.engine === "zombie"){
         console.log('zombie...')
         this.options._browser.visit(this.options.host, function(e, browser, status){
-            if(status >= 200 && status <=300){
-                self._collectStylesheets(true, browser);
-            }
+            if(e) return
+            callback.call(self, {
+                browser: browser,
+                status: status
+            })
         });
     } else {
         console.log('tobi...')
         this.options._browser.get(page, function(res, $){
-            if($){
-                self._collectStylesheets(false, null, $)
-            }
+            callback.call(self, {
+                "$": $
+            })
         });
     }
+}
+
+CSSChecker.prototype._getStylesheets = function(opts){
+
+    var options = {
+        browser: opts.browser || null,
+        status: opts.status || null,
+        $: opts.$ || null
+    }
+
+    if(options.browser && options.status && options.status>=200 && options.status <= 300){
+        this._collectStylesheets(true, options.browser);
+    } else if(options.$) {
+        this._collectStylesheets(false, null, options.$)
+    }
+
 }
 
 CSSChecker.prototype._collectStylesheets = function(hasDocument, browser, $){
@@ -77,7 +95,7 @@ CSSChecker.prototype._collectStylesheets = function(hasDocument, browser, $){
         }
 
         for(var i=0, l=cssFiles.length;i<l;i++){
-            var _href = cssFiles.eq(i).attr("href") && this.options.host+cssFiles.eq(i).attr("href");
+            var _href = cssFiles.eq(i).attr("href") && this.options.host+"/"+cssFiles.eq(i).attr("href");
             if(_href){
                 console.log("checking "+_href)
                 this._fetchFile(_href, function(body){
@@ -123,7 +141,8 @@ CSSChecker.prototype._collectRules = function(css){
     this.options._counter.parsed = this.options._counter.parsed+1;
 
     if(this.options._counter.parsed == this.options._counter.css){
-        console.log('finished - found '+this.options._rules.length+" rules to analyze");
+        console.log('>>> found '+this.options._rules.length+" rules to analyze");
+        this._checkUsedRules();
     }
 }
 
@@ -145,6 +164,33 @@ CSSChecker.prototype._fetchFile = function(url, cb){
     }, function(e, r, b){
         return cb(b)
     })
+}
+
+CSSChecker.prototype._checkUsedRules = function(){
+
+    for(var i=0,l=this.options.pages.length;i<l;i++){
+        this._visitPage(this.options.pages[i], this._check);
+    }
+
+}
+
+CSSChecker.prototype._check = function(options){
+
+    if(options.$){
+        for(var i=0,l=this.options._rules.length; i<l; i++){
+            try {
+                if(options.$(this.options._rules[i]).length){
+                    this.options._usedRules.push(this.options._rules[i])
+                }
+            } catch(e) {
+                //some errors...
+            }
+        }
+
+        console.log("===");
+        console.log(this.options._rules.length - this.options._usedRules.length +" unused rules in this page");
+    }
+
 }
 
 module.exports = CSSChecker;

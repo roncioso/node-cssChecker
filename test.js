@@ -1,9 +1,10 @@
 var CC = require('./main');
 
 var u = new CC({
-    host: 'www.juglugano.ch',
+    host: 'lab.smashup.it',
     pages: [
-        "/"
+        "/",
+        "/flip"
     ],
     engine: 'tobi'
 });
