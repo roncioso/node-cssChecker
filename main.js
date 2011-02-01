@@ -1,6 +1,8 @@
 var zombie = require('zombie'),
     request = require('request'),
-    tobi = require('tobi');
+    tobi = require('tobi'),
+    jsdom = require('jsdom').jsdom;
+
 
 CSSChecker = function(options){
 
@@ -15,7 +17,8 @@ CSSChecker = function(options){
         _counter: {
             'css': 0,
             'parsed': 0
-        }
+        },
+        _pages: {} // Should be a pages cache
     };
 
     this.init();
@@ -34,16 +37,20 @@ CSSChecker.prototype._initBrowser = function(){
         console.log('[using ZOMBIE engine]');
         this.options._browser = new zombie.Browser({ debug: false })
         this.options._browser.runScripts = false;
-    } else {
+    } else if(this.options.engine === "tobi"){
         console.log('[using TOBI engine]');
         this.options._browser = tobi.createBrowser(this.options.port, this.options.host.replace("http://", ""))
+    } else {
+        console.log('[using jsdom engine]');
+        this.options._browser = jsdom
     }
 }
 
 CSSChecker.prototype._visitPage = function(page, callback){
 
-    var cssFiles = null,
-        self = this;
+    //TODO cache every page
+
+    var self = this;
 
     if(this.options.engine === "zombie"){
         console.log('zombie...')
@@ -54,13 +61,30 @@ CSSChecker.prototype._visitPage = function(page, callback){
                 status: status
             })
         });
-    } else {
+    } else if(this.options.engine === "tobi") {
         console.log('tobi...')
         this.options._browser.get(page, function(res, $){
             callback.call(self, {
                 "$": $
             })
         });
+    } else {
+
+        if(this.options._pages[this.options.host+page] && this.options._pages[this.options.host+page].window){
+            console.log("page is already here...");
+            callback.call(self, {
+                window: this.options._pages[this.options.host+page].window
+            })
+        } else {
+            console.log("page is not in cache...fetching...")
+            this._fetchFile(this.options.host+page, function(body){
+                self.options._pages[self.options.host+page] = {};
+                self.options._pages[self.options.host+page].window = self.options._browser(body, null, { features: {QuerySelector: true, FetchExternalResources: ["script", "css", "link"]} }).createWindow();
+                callback.call(self, {
+                    window: self.options._pages[self.options.host+page].window
+                });
+            });
+        }
     }
 }
 
@@ -69,13 +93,16 @@ CSSChecker.prototype._getStylesheets = function(opts){
     var options = {
         browser: opts.browser || null,
         status: opts.status || null,
-        $: opts.$ || null
+        $: opts.$ || null,
+        window: opts.window || null
     }
 
     if(options.browser && options.status && options.status>=200 && options.status <= 300){
         this._collectStylesheets(true, options.browser);
     } else if(options.$) {
         this._collectStylesheets(false, null, options.$)
+    } else if(options.window){
+        this._collectStylesheets(true, options.window)
     }
 
 }
@@ -167,19 +194,33 @@ CSSChecker.prototype._fetchFile = function(url, cb){
 }
 
 CSSChecker.prototype._checkUsedRules = function(){
-
     for(var i=0,l=this.options.pages.length;i<l;i++){
         this._visitPage(this.options.pages[i], this._check);
     }
-
 }
 
 CSSChecker.prototype._check = function(options){
+
+    //TODO it misses features for zombie
+    //TODO compact _check method
 
     if(options.$){
         for(var i=0,l=this.options._rules.length; i<l; i++){
             try {
                 if(options.$(this.options._rules[i]).length){
+                    this.options._usedRules.push(this.options._rules[i])
+                }
+            } catch(e) {
+                //some errors...
+            }
+        }
+
+        console.log("===");
+        console.log(this.options._rules.length - this.options._usedRules.length +" unused rules in this page");
+    } else {
+        for(var i=0,l=this.options._rules.length; i<l; i++){
+            try {
+                if(options.window.document.querySelectorAll(this.options._rules[i]).length){
                     this.options._usedRules.push(this.options._rules[i])
                 }
             } catch(e) {
