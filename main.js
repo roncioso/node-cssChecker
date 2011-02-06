@@ -1,8 +1,9 @@
-var zombie = require('zombie'),
+var jsdom = require('jsdom').jsdom,
+    zombie = require('zombie'),
     request = require('request'),
-    tobi = require('tobi'),
-    jsdom = require('jsdom').jsdom;
+    tobi = require('tobi');
 
+//TODO provide external adapters
 
 CSSChecker = function(options){
 
@@ -79,7 +80,7 @@ CSSChecker.prototype._visitPage = function(page, callback){
             console.log("page is not in cache...fetching...")
             this._fetchFile(this.options.host+page, function(body){
                 self.options._pages[self.options.host+page] = {};
-                self.options._pages[self.options.host+page].window = self.options._browser(body, null, { features: {QuerySelector: true, FetchExternalResources: ["script", "css", "link"]} }).createWindow();
+                self.options._pages[self.options.host+page].window = self.options._browser(body, null, { features: {QuerySelector: true, FetchExternalResources: ["css", "link"]} }).createWindow();
                 callback.call(self, {
                     window: self.options._pages[self.options.host+page].window
                 });
@@ -111,6 +112,8 @@ CSSChecker.prototype._collectStylesheets = function(hasDocument, browser, $){
 
     var cssFiles = null,
         self = this;
+
+    //TODO cache every stylesheet with info where is used
 
     if(!hasDocument){
 
