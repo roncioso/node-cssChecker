@@ -1,10 +1,10 @@
 var CC = require('./main');
 
 var u = new CC({
-    host: 'www.exmachina.ch',
+    host: 'lab.smashup.it',
     pages: [
         "/",
-        "/contacts.html"
+        "/flip"
     ],
-    engine: 'tobi'
+    engine: 'jsdom'
 });
