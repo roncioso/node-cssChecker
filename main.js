@@ -15,7 +15,8 @@ CSSChecker = function(options){
         _usedRules: [],
         _counter: {
             'css': 0,
-            'parsed': 0
+            'parsed': 0,
+            'processedPages': 0
         },
         jsdom_options: {
             features: {
@@ -33,9 +34,19 @@ CSSChecker = function(options){
 
 CSSChecker.prototype.init = function(){
     this._initBrowser();
-    
+
+    var self = this;
+
     for(var i=0,l=this.options.pages.length;i<l;i++){
-        this._visitPage(this.options.pages[i], this._collectStylesheets);
+        this._visitPage(this.options.pages[i], function(){
+
+            self.options._counter.processedPages = self.options._counter.processedPages+1;
+
+            if(self.options._counter.processedPages == self.options.pages.length){
+                self._findCss()
+            }
+            
+        })
     }
 }
 
@@ -54,9 +65,7 @@ CSSChecker.prototype._visitPage = function(page, callback){
 
         console.log("[page is already here...]");
 
-        callback.call(self, {
-            window: self.utils.getCache(o._pages, o.host+page, "window")
-        });
+        callback.call(self, self.utils.getCache(o._pages, o.host+page, "window"));
 
     } else {
 
@@ -76,8 +85,78 @@ CSSChecker.prototype._visitPage = function(page, callback){
     
 }
 
+CSSChecker.prototype._findCss = function(){
+
+    var self = this,
+        parsedCounter = 0;
+
+    for(var i in this.options._pages){
+
+        var cssFiles = this.options._pages[i].window.document.styleSheets;
+
+        for( var q=0, l=cssFiles.length ; q<l ; q++ ) {
+
+            var type = cssFiles[q].cssText.length ? "inline" : "external";
+
+            if(type == "inline"){
+
+                console.log("inline stylesheet");
+
+                var oldCssText = this.utils.getCache(this.options._css, "inline") ? this.utils.getCache(this.options._css, "inline").cssText : "";
+
+                this.utils.setCache(this.options._css, "inline", {
+                    cssText: cssFiles[q].cssText + " " + oldCssText
+                });
+
+                parsedCounter = parsedCounter+1;
+
+                if(parsedCounter == cssFiles.length){
+                    console.log("this is the last one: "+ (parseInt(parsedCounter,10)+1) +" of "+ (parseInt(cssFiles.length,10)+1));
+                }
+
+            } else {
+
+                var url = "";
+                if(cssFiles[q].href.match(/^http/)){
+                    url = cssFiles[q].href;
+                } else {
+                    url = cssFiles[q].href[0] == "/" ? this.options.host+cssFiles[q].href : this.options.host+"/"+cssFiles[q].href
+                }
+
+                (function(url, parsedCounter, cssFiles){
+
+                    var self = this;
+
+                    this._fetchFile(url, function(body) {
+
+                    console.log("fetching..."+url);
+
+                    self.utils.setCache(self.options._css, url, {
+                        cssText: body
+                    });
+//TODO trovare una via d'uscita da sta closure
+                    parsedCounter = parsedCounter+1;
+                    console.log(parsedCounter)
+                    if(parsedCounter == cssFiles.length){
+                        console.log("this is the last one: "+ (parseInt(parsedCounter,10)+1) +" of "+ (parseInt(cssFiles.length,10)+1));
+                        for(var s in self.options._css){
+                            console.log(s);
+                        }
+                    }
+
+                })}).call(this, url, parsedCounter, cssFiles);
+
+            }
+
+        }
+
+    }
+
+}
+
 CSSChecker.prototype._collectStylesheets = function(window){
 
+    //////////// REWRITE
     var cssFiles = window.document.styleSheets,
         self = this,
         o = this.options,
@@ -87,48 +166,51 @@ CSSChecker.prototype._collectStylesheets = function(window){
 
     o._counter.css = o._counter.css + window.document.styleSheets.length
 
-    if(!cssFiles){
+    if(!cssFiles.length){
         return
     }
 
-    for( var i=0, l=cssFiles.length ; i<l ; i++ ){
+    console.log('there are '+cssFiles.length+' styles')
 
-        var _href = cssFiles[i].href.match(/$http/) ? cssFiles[i].href : o.host+"/"+cssFiles[i].href;
+    for( var i=0, l=cssFiles.length ; i<l ; i++ ) {
 
-        if(_href == o.host+"/"){
+        var _href = cssFiles[i].href.match(/$http/) ? cssFiles[i].href : o.host + "/" + cssFiles[i].href;
+
+        if (_href != o.host + "/") {
+
+            console.log("checking " + _href);
+
+            this._fetchFile(_href, function(body) {
+
+                self.utils.setCache(o._css, _href, {
+                    cssText: body
+                });
+
+                fetcherCounter = fetcherCounter + 1;
+
+                if (fetcherCounter == cssFiles.length) {
+                    console.log("okay this is the latest stylesheet let's process it "+_href);
+                    self._collectRules(body)
+                }
+
+            });
+
+        } else {
             console.log("checking inline stylesheets...");
 
             this.utils.setCache(o._css, "inline", {
                 cssText: cssFiles[i].cssText
             });
 
-            fetcherCounter = fetcherCounter+1;
+            fetcherCounter = fetcherCounter + 1;
 
-            if(fetcherCounter == cssFiles.length){
+            if (fetcherCounter == cssFiles.length) {
                 console.log("okay this is the latest stylesheet let's process it");
                 this._collectRules(cssFiles[i].cssText);
             }
 
-        } else {
-
-            console.log("checking "+_href);
-
-            this._fetchFile(_href, function(body){
-
-                self.utils.setCache(o._css, _href, {
-                    cssText: body
-                });
-
-                fetcherCounter = fetcherCounter+1;
-
-                if(fetcherCounter == cssFiles.length){
-                    console.log("okay this is the latest stylesheet let's process it");
-                    self._collectRules(body)
-                }
-            });
-
         }
-        
+
     }
 
 }
@@ -229,6 +311,11 @@ CSSChecker.prototype.utils = {
         }
     },
     getCache: function(whereObj, name, prop){
+
+        if(arguments.length==1){
+            return whereObj
+        }
+
         if(prop && whereObj[name] && whereObj[name][prop]){
             return whereObj[name][prop]
         } else {
