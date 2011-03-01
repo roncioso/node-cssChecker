@@ -1,14 +1,12 @@
 var jsdom = require('jsdom').jsdom,
     request = require('request');
 
-//TODO provide external adapters
-
 CSSChecker = function(options){
 
     this.options = {
         host: "http://"+options.host,
         pages: options.pages || [],
-        engine: options.engine || "zombie",
+        engine: options.engine || "jsdom",
         port: options.port || 80,
         _browser: null,
         _rules: [],
@@ -64,33 +62,26 @@ CSSChecker.prototype._visitPage = function(page, callback){
         o = this.options,
         pages = o._pages;
 
-    /* TODO checking if page is in cache
-    if(this.utils.getCache(o._pages, o.host+page, "window")){
+    // TODO checking if page is in cache
+    this._fetchFile(o.host+page, function(body){
 
-        console.log("[page is already here...]");
-
-        callback.call(self, self.utils.getCache(o._pages, o.host+page, "window"));
-
-    } else {
-
-        console.log("[page is not in cache...fetching...]");
-*/
-        this._fetchFile(o.host+page, function(body){
-
-            var win = o._browser(body, null, o.jsdom_options).createWindow()
-
-            pages.push({
+        var win = o._browser(body, null, o.jsdom_options).createWindow(),
+            pageObj = {
                 url: o.host+page,
                 window: win,
                 css: win.document.styleSheets
-            })
-            
-            callback.call(self, self.utils.getCache(o._pages, o.host+page, "window"));
+            };
 
+        pageObj.css.forEach(function(cssObj){
+            cssObj.href = self.utils.getFullUrl(cssObj.href, self.options.host);
         });
-        
-    //}
-    
+
+        pages.push(pageObj);
+
+        callback.call(self, self.utils.getCache(o._pages, o.host+page, "window"));
+
+    });
+
 }
 
 CSSChecker.prototype._findCss = function(){
@@ -108,7 +99,7 @@ CSSChecker.prototype._findCss = function(){
 
         cssFiles.forEach(function(css){
 
-            var type = css.cssText.length ? "inline" : "external";
+            var type = css.cssText && css.cssText.length ? "inline" : "external";
 
             if(type == "inline"){
 
@@ -122,14 +113,14 @@ CSSChecker.prototype._findCss = function(){
                         url: "inline",
                         cssText: inlineCss
                     });
-                    self._collectStylesheets();
+                    self._collectRules();
                 }
 
             } else {
 
                 console.info("[processing "+css.href+"]");
 
-                var url = css.href.match(/^http/) ? css.href : (css.href[0] == "/" ? self.options.host+css.href : self.options.host+"/"+css.href);
+                var url = self.utils.getFullUrl(css.href, self.options.host)
 
                 self._fetchFile(url, function(body) {
 
@@ -142,7 +133,7 @@ CSSChecker.prototype._findCss = function(){
 
                     if(--left == 0 && --pagesLeft == 0){
                         console.log("this is the last one: "+ left);
-                        self._collectStylesheets();
+                        self._collectRules();
                     }
 
                 });
@@ -155,41 +146,47 @@ CSSChecker.prototype._findCss = function(){
 
 }
 
-CSSChecker.prototype._collectStylesheets = function(window){
+CSSChecker.prototype._collectRules = function(){
+
+    var self = this;
 
     this.options._css.forEach(function(cssFile){
-        console.log(cssFile.url)
-    })
+        cssFile["rules"] = self._parseCSSRules(cssFile["cssText"]);
+    });
 
-}
+    this._analyzeUsage();
 
-CSSChecker.prototype._collectRules = function(css){
+};
 
-    var cssCache = this.utils.getCache(this.options, "_css"),
-        o = this.options;
+CSSChecker.prototype._analyzeUsage = function(){
 
-    for(var i in cssCache){
-        console.log("A")
-        if(!cssCache[i].parsed || cssCache[i].parsed != true){
-            console.log("B")
-            // Populatin rules array...
-            o._rules = o._rules.concat(this._parseCSSRules(cssCache[i].cssText));
+    var self = this;
 
-            // Counting css...
-            this.options._counter.parsed = this.options._counter.parsed+1;
+    this.options._pages.forEach(function(page){
 
-            cssCache[i].parsed = true;
+        var cssUrls = [];
 
-            if(this.options._counter.parsed == this.options._counter.css){
-                console.log("C")
-                console.log('>>> found '+this.options._rules.length+" rules to analyze");
-                this._checkUsedRules();
-            }
+        page.css.forEach(function(cssObj){
 
-        }
-    }
+            cssUrls.push(cssObj.href);
 
-}
+        });
+
+        cssUrls.forEach(function(url){
+
+            self.options._css.forEach(function(cssFile){
+
+                if(cssFile.url == url) {
+                    self._check(page, cssFile);   
+                }
+
+            });
+
+        });
+
+    });
+
+};
 
 CSSChecker.prototype._parseCSSRules = function(css){
 	css = css.replace(/\/\*([^\*\/]*)\*\//gi,"") // Removing comments
@@ -212,44 +209,31 @@ CSSChecker.prototype._fetchFile = function(url, cb){
 }
 
 CSSChecker.prototype._checkUsedRules = function(){
+    console.log("_checkedUsedRules deprecated");
     for(var i=0,l=this.options.pages.length;i<l;i++){
         this._visitPage(this.options.pages[i], this._check);
     }
 }
 
-CSSChecker.prototype._check = function(options){
+CSSChecker.prototype._check = function(pageObj, cssObj){
 
-    //TODO it misses features for zombie
-    //TODO compact _check method
+    console.log(cssObj.rules.length);
+    console.log("===");
 
-    if(options.$){
-        for(var i=0,l=this.options._rules.length; i<l; i++){
-            try {
-                if(options.$(this.options._rules[i]).length){
-                    this.options._usedRules.push(this.options._rules[i])
-                }
-            } catch(e) {
-                //some errors...
-            }
+    var rules = cssObj.rules.concat();
+
+    var unusedRules = rules.filter(function(rule){
+        try {
+            return !pageObj.window.document.querySelectorAll(rule).length
+        } catch(e){
+            return false
         }
-
-        console.log("===");
-        console.log(this.options._rules.length - this.options._usedRules.length +" unused rules in this page");
-    } else {
-        for(var i=0,l=this.options._rules.length; i<l; i++){
-            try {
-                if(options.window.document.querySelectorAll(this.options._rules[i]).length){
-                    this.options._usedRules.push(this.options._rules[i])
-                }
-            } catch(e) {
-                //some errors...
-            }
-        }
-
-        console.log("===");
-        console.log(this.options._rules.length - this.options._usedRules.length +" unused rules in this page");
-    }
-
+    });
+    console.log("TODELETE: ["+cssObj.url+"] "+unusedRules.join(",\n"));
+    console.log("===");
+    console.log(unusedRules.length);
+    console.log("\n");
+    console.log("\n");
 }
 
 CSSChecker.prototype.utils = {
@@ -269,6 +253,9 @@ CSSChecker.prototype.utils = {
         } else {
             return whereObj[name]
         }
+    },
+    getFullUrl: function(resourceUrl, host){
+        return resourceUrl.match(/^http/) ? resourceUrl : (resourceUrl[0] == "/" ? host+resourceUrl : host+"/"+resourceUrl)
     }
 }
 
